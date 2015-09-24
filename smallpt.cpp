@@ -26,6 +26,7 @@ struct Ray;
 glm::vec3 radiance(const Ray &r, int nRecursion);
 bool refract(glm::vec3 i, glm::vec3 n, float ior, glm::vec3 &wo);
 float fresnelR(const glm::vec3 i, const glm::vec3 n, const float ior);
+glm::vec3 sample_cos(const float u, const float v, const glm::vec3 n);
 float random_u();
 
 bool isIntersect(float t)
@@ -105,24 +106,45 @@ struct Diffuse
 
     const glm::vec3 BSDF_Direct(const glm::vec3& c, const glm::vec3& n, const glm::vec3& l) const{
 
-        float coeffLux = fabs(glm::dot(n, l)/pi);
-        return coeffLux*albedo();
+        return albedo();
     }
 
     const glm::vec3 BSDF_Indirect(const glm::vec3& c, const glm::vec3& n) const{
 
-        return glm::vec3(0,0,0);
+        return albedo();
     }
 
     glm::vec3 direct(const Ray& c, const glm::vec3& n, const Ray& l) const {
         //direct = V(p, lampe) * BSDF_direct() * couleurLampe
-        return BSDF_Direct(c.direction, n, l.direction);
+        float coeffLux = fabs(glm::dot(n, l.direction)/pi);
+        return coeffLux*BSDF_Direct(c.direction, n, l.direction);
     }
 
     glm::vec3 indirect(const Ray& c, const glm::vec3& n, const glm::vec3& p, const int& nReccursion) const {
-        //indirect = alpha * BSDF_indirect * radiance()
-        return BSDF_Indirect(c.direction, n) * (float)0;
+
+        if(nReccursion < N_RECURSION_RADIANCE_MAX){
+
+            glm::vec3 colorSomme(0,0,0);
+            int nMax = 1;
+
+            for(int i=0; i < nMax; i++){
+
+                glm::vec3 dSample;
+                if(glm::dot(n, -c.direction) < 0)
+                    dSample = sample_cos(random_u(), random_u(), -n);
+                else
+                    dSample = sample_cos(random_u(), random_u(), n);
+
+                Ray sample{p+0.002f*dSample, dSample};
+                colorSomme += BSDF_Indirect(c.direction, n) * radiance(sample, nReccursion+1);
+            }
+
+            return colorSomme/(float)nMax;
+        }
+
+        return glm::vec3(0,0,0);
     }
+
 
 };
 
@@ -501,7 +523,6 @@ glm::vec3 radiance (const Ray & r, int nRecursion)
         glm::vec3 n = glm::normalize(obj->normal(rOmbre.origin));
 
         if(tOmbre == noIntersect || tOmbre*tOmbre > distanceLampeCarre){
-
             return obj->luxDirect(r, n, rOmbre) + obj->luxIndirect(r, n, pImpact, nRecursion);
         }
         else
@@ -543,7 +564,12 @@ int main (int, char **)
 
             glm::vec3 d = glm::normalize(pp1 - pp0);
 
-            glm::vec3 r = radiance (Ray{pp0, d}, 0);
+            glm::vec3 r(0,0,0);
+            for(int i=0; i < 10; i++){
+                r += radiance (Ray{pp0, d}, 0);
+            }
+            r/= 10.f;
+
             colors[y * w + x] += glm::clamp(r, glm::vec3(0.f, 0.f, 0.f), glm::vec3(1.f, 1.f, 1.f)) * 0.25f;
         }
     }
