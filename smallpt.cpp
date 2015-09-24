@@ -550,10 +550,10 @@ int main (int, char **)
 
     glm::mat4 screenToRay = glm::inverse(camera);
 
+    #pragma omp parallel for
     for (int y = 0; y < h; y++)
     {
         std::cerr << "\rRendering: " << 100 * y / (h - 1) << "%";
-
         for (unsigned short x = 0; x < w; x++)
         {
             glm::vec4 p0 = screenToRay * glm::vec4{float(x), float(h - y), 0.f, 1.f};
@@ -565,7 +565,8 @@ int main (int, char **)
             glm::vec3 d = glm::normalize(pp1 - pp0);
 
             glm::vec3 r(0,0,0);
-            for(int i=0; i < 10; i++){
+
+            for(int i=0; i < 20; i++){
                 r += radiance (Ray{pp0, d}, 0);
             }
             r/= 10.f;
