@@ -554,22 +554,34 @@ int main (int, char **)
     for (int y = 0; y < h; y++)
     {
         std::cerr << "\rRendering: " << 100 * y / (h - 1) << "%";
+        int nAnti;
+
         for (unsigned short x = 0; x < w; x++)
         {
-            glm::vec4 p0 = screenToRay * glm::vec4{float(x), float(h - y), 0.f, 1.f};
-            glm::vec4 p1 = screenToRay * glm::vec4{float(x), float(h - y), 1.f, 1.f};
-
-            glm::vec3 pp0 = glm::vec3(p0 / p0.w);
-            glm::vec3 pp1 = glm::vec3(p1 / p1.w);
-
-            glm::vec3 d = glm::normalize(pp1 - pp0);
-
             glm::vec3 r(0,0,0);
 
-            for(int i=0; i < 20; i++){
+            //antialiasing + //réduction bruit dù au indirect de diffus
+            for(nAnti=0; nAnti < 100; nAnti++){
+                float u = random_u(), v = random_u();
+
+                float rs = sqrt(-2*log(u));
+
+                float delX = rs*cos(2*pi*v), delY = rs*sin(2*pi*v);
+
+                glm::vec4 p0 = screenToRay * glm::vec4{float(x), float(h - y), 0.f, 1.f};
+                glm::vec4 p1 = screenToRay * glm::vec4{float(x+delX*0.5), float(h - y+delY*0.5), 1.f, 1.f};
+
+
+                glm::vec3 pp0 = glm::vec3(p0 / p0.w);
+                glm::vec3 pp1 = glm::vec3(p1 / p1.w);
+
+
+                glm::vec3 d = glm::normalize(pp1 - pp0);
+
                 r += radiance (Ray{pp0, d}, 0);
             }
-            r/= 10.f;
+            r/=(float)nAnti;
+
 
             colors[y * w + x] += glm::clamp(r, glm::vec3(0.f, 0.f, 0.f), glm::vec3(1.f, 1.f, 1.f)) * 0.25f;
         }
