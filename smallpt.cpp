@@ -20,6 +20,7 @@ const float pi = 3.1415927f;
 const float noIntersect = std::numeric_limits<float>::infinity();
 
 const int N_RECURSION_RADIANCE_MAX = 4;
+const float LUX = 3000;
 
 //déclarations
 struct Ray;
@@ -102,6 +103,7 @@ float intersect(const Ray & ray, const Triangle &triangle)
 struct Diffuse
 {
     const glm::vec3 color;
+    const float coefficientSpeculaire;
     const glm::vec3 albedo() const { return color; }
 
     const glm::vec3 BSDF_Direct(const glm::vec3& c, const glm::vec3& n, const glm::vec3& l) const{
@@ -114,9 +116,10 @@ struct Diffuse
         return albedo();
     }
 
-    glm::vec3 direct(const Ray& c, const glm::vec3& n, const Ray& l) const {
+    glm::vec3 direct(const Ray& c, const glm::vec3& n, const Ray& l, const float& distanceLuxCarre) const {
         //direct = V(p, lampe) * BSDF_direct() * couleurLampe
-        float coeffLux = fabs(glm::dot(n, l.direction)/pi);
+        float coeffLux = fabs(glm::dot(n, l.direction)/pi) * LUX / distanceLuxCarre;
+        coeffLux += pow( fabs(glm::dot( reflect(l.direction, n), -c.direction )), coefficientSpeculaire );
         return coeffLux*BSDF_Direct(c.direction, n, l.direction);
     }
 
@@ -151,12 +154,13 @@ struct Diffuse
 struct Glass
 {
     const glm::vec3 color;
+    const float coefficientSpeculaire;
 
     const glm::vec3 albedo() const { return color; }
 
     const glm::vec3 BSDF_Direct(const glm::vec3& c, const glm::vec3& n, const glm::vec3& l) const{
 
-        return albedo()*(float)0;
+        return albedo();
     }
 
     const glm::vec3 BSDF_Indirect(const glm::vec3& c, const glm::vec3& n) const{
@@ -164,9 +168,11 @@ struct Glass
         return albedo();
     }
 
-    glm::vec3 direct(const Ray& c, const glm::vec3& n, const Ray& l) const {
+    glm::vec3 direct(const Ray& c, const glm::vec3& n, const Ray& l, const float& distanceLuxCarre) const {
         //direct = V(p, lampe) * BSDF_direct() * couleurLampe
-        return BSDF_Direct(c.direction, n, l.direction);
+        return BSDF_Direct(c.direction, n, l.direction) *
+                (float)pow( fabs(glm::dot( reflect(l.direction, n), -c.direction )), coefficientSpeculaire ) *
+                LUX / distanceLuxCarre;
     }
 
     glm::vec3 indirect(const Ray& c, const glm::vec3& n, const glm::vec3& p, const int& nReccursion) const {
@@ -196,7 +202,6 @@ struct Glass
             else{
 
                 float ran = random_u();
-
                 float fresnel = fresnelR(-c.direction, n, 1.33);
 
                 if(ran < fresnel){
@@ -226,6 +231,8 @@ struct Glass
 struct Mirror
 {
     const glm::vec3 color;
+    const float coefficientSpeculaire;
+
     const glm::vec3 albedo() const { return color; }
 
     const glm::vec3 BSDF_Direct(const glm::vec3& c, const glm::vec3& n, const glm::vec3& l) const {
@@ -235,7 +242,7 @@ struct Mirror
          * BSDF_mirroir (C,Np,L) = 0
          */
 
-        return glm::vec3(0,0,0);
+        return albedo();
     }
 
     const glm::vec3 BSDF_Indirect(const glm::vec3& c, const glm::vec3& n) const {
@@ -248,17 +255,23 @@ struct Mirror
         return albedo();
     }
 
-    glm::vec3 direct(const Ray& c, const glm::vec3& n, const Ray& l) const {
+    glm::vec3 direct(const Ray& c, const glm::vec3& n, const Ray& l, const float& distanceLuxCarre) const {
         //direct = V(p, lampe) * BSDF_direct() * couleurLampe
-        return BSDF_Direct(c.direction, n, l.direction) * (float)0;
+        return BSDF_Direct(c.direction, n, l.direction);
+                /*(float)pow( fabs(glm::dot( reflect(l.direction, n), -c.direction )), coefficientSpeculaire ) *
+                LUX / distanceLuxCarre;*/
     }
 
     glm::vec3 indirect(const Ray& c, const glm::vec3& n, const glm::vec3& p, const int& nReccursion) const {
         //indirect = alpha * BSDF_indirect * radiance()
-        glm::vec3 dNewRay = glm::normalize( reflect(c.direction, n) );
-        Ray newRay { p +(float)0.02*dNewRay, dNewRay};
+        glm::vec3 retour(0,0,0);
 
-        glm::vec3 retour = BSDF_Indirect(-c.direction, n) * radiance( newRay, nReccursion+1 );
+        if(nReccursion < N_RECURSION_RADIANCE_MAX){
+            glm::vec3 dNewRay = glm::normalize( reflect(c.direction, n) );
+            Ray newRay { p +(float)0.02*dNewRay, dNewRay};
+
+            retour = BSDF_Indirect(-c.direction, n) * radiance( newRay, nReccursion+1 );
+        }
 
         return retour;
     }
@@ -270,7 +283,7 @@ struct Object
     virtual float intersect(const Ray &r) const = 0;
     virtual const glm::vec3 albedo() const = 0;
     virtual const glm::vec3 normal(const glm::vec3 &point) const = 0;
-    virtual const glm::vec3 luxDirect(const Ray& c, const glm::vec3& n, const Ray& p) const = 0;
+    virtual const glm::vec3 luxDirect(const Ray& c, const glm::vec3& n, const Ray& p, const float& distanceLuxCarre) const = 0;
     virtual const glm::vec3 luxIndirect(const Ray& c, const glm::vec3& n, const glm::vec3& p, const int& nReccursion) const = 0;
 
 };
@@ -295,8 +308,8 @@ struct ObjectTpl final : Object
         return primitive.getNormal(point);
     }
 
-    const glm::vec3 luxDirect(const Ray& c, const glm::vec3& n, const Ray& p) const{
-        return material.direct(c,n,p);
+    const glm::vec3 luxDirect(const Ray& c, const glm::vec3& n, const Ray& p, const float& distanceLuxCarre) const{
+        return material.direct(c,n,p, distanceLuxCarre);
     }
 
     const glm::vec3 luxIndirect(const Ray& c, const glm::vec3& n, const glm::vec3& p, const int& nReccursion) const{
@@ -319,59 +332,59 @@ namespace scene
 {
 // Primitives
 
-// Left Wall
-const Triangle leftWallA{{0, 0, 0}, {0, 100, 0}, {0, 0, 150}};
-const Triangle leftWallB{{0, 100, 150}, {0, 100, 0}, {0, 0, 150}};
+    // Left Wall
+    const Triangle leftWallA{{0, 0, 0}, {0, 100, 0}, {0, 0, 150}};
+    const Triangle leftWallB{{0, 100, 150}, {0, 100, 0}, {0, 0, 150}};
 
-// Right Wall
-const Triangle rightWallA{{100, 0, 0}, {100, 100, 0}, {100, 0, 150}};
-const Triangle rightWallB{{100, 100, 150}, {100, 100, 0}, {100, 0, 150}};
+    // Right Wall
+    const Triangle rightWallA{{100, 0, 0}, {100, 100, 0}, {100, 0, 150}};
+    const Triangle rightWallB{{100, 100, 150}, {100, 100, 0}, {100, 0, 150}};
 
-// Back wall
-const Triangle backWallA{{0, 0, 0}, {100, 0, 0}, {100, 100, 0}};
-const Triangle backWallB{{0, 0, 0}, {0, 100, 0}, {100, 100, 0}};
+    // Back wall
+    const Triangle backWallA{{0, 0, 0}, {100, 0, 0}, {100, 100, 0}};
+    const Triangle backWallB{{0, 0, 0}, {0, 100, 0}, {100, 100, 0}};
 
-// Bottom Floor
-const Triangle bottomWallA{{0, 0, 0}, {100, 0, 0}, {100, 0, 150}};
-const Triangle bottomWallB{{0, 0, 0}, {0, 0, 150}, {100, 0, 150}};
+    // Bottom Floor
+    const Triangle bottomWallA{{0, 0, 0}, {100, 0, 0}, {100, 0, 150}};
+    const Triangle bottomWallB{{0, 0, 0}, {0, 0, 150}, {100, 0, 150}};
 
-// Top Ceiling
-const Triangle topWallA{{0, 100, 0}, {100, 100, 0}, {0, 100, 150}};
-const Triangle topWallB{{100, 100, 150}, {100, 100, 0}, {0, 100, 150}};
+    // Top Ceiling
+    const Triangle topWallA{{0, 100, 0}, {100, 100, 0}, {0, 100, 150}};
+    const Triangle topWallB{{100, 100, 150}, {100, 100, 0}, {0, 100, 150}};
 
-const Sphere leftSphere{16.5, glm::vec3 {27, 16.5, 47}};
-const Sphere rightSphere{16.5, glm::vec3 {73, 16.5, 78}};
+    const Sphere leftSphere{16.5, glm::vec3 {27, 16.5, 47}};
+    const Sphere rightSphere{16.5, glm::vec3 {73, 16.5, 78}};
 
-const glm::vec3 light{50, 70, 81.6};
+    const glm::vec3 light{50, 70, 81.6};
 
-// Materials
-const Diffuse white{{.75, .75, .75}};
-const Diffuse red{{.75, .25, .25}};
-const Diffuse blue{{.25, .25, .75}};
+    // Materials
+    const Diffuse white{{.75, .75, .75}, 10};
+    const Diffuse red{{.75, .25, .25}, 10};
+    const Diffuse blue{{.25, .25, .75}, 10};
 
-const Glass glass{{.9, .7, .9}};
-const Mirror mirror{{.9, .9, .5}};
+    const Glass glass{{.9, .7, .9}, 20};
+    const Mirror mirror{{.9, .9, .5}, 0};
 
-// Objects
-// Note: this is a rather convoluted way of initialising a vector of unique_ptr ;)
-const std::vector<std::unique_ptr<Object>> objects = [] (){
-    std::vector<std::unique_ptr<Object>> ret;
-    ret.push_back(makeObject(backWallA, white));
-    ret.push_back(makeObject(backWallB, white));
-    ret.push_back(makeObject(topWallA, white));
-    ret.push_back(makeObject(topWallB, white));
-    ret.push_back(makeObject(bottomWallA, white));
-    ret.push_back(makeObject(bottomWallB, white));
-    ret.push_back(makeObject(rightWallA, blue));
-    ret.push_back(makeObject(rightWallB, blue));
-    ret.push_back(makeObject(leftWallA, red));
-    ret.push_back(makeObject(leftWallB, red));
+    // Objects
+    // Note: this is a rather convoluted way of initialising a vector of unique_ptr ;)
+    const std::vector<std::unique_ptr<Object>> objects = [] (){
+        std::vector<std::unique_ptr<Object>> ret;
+        ret.push_back(makeObject(backWallA, white));
+        ret.push_back(makeObject(backWallB, white));
+        ret.push_back(makeObject(topWallA, white));
+        ret.push_back(makeObject(topWallB, white));
+        ret.push_back(makeObject(bottomWallA, white));
+        ret.push_back(makeObject(bottomWallB, white));
+        ret.push_back(makeObject(rightWallA, blue));
+        ret.push_back(makeObject(rightWallB, blue));
+        ret.push_back(makeObject(leftWallA, red));
+        ret.push_back(makeObject(leftWallB, red));
 
-    ret.push_back(makeObject(leftSphere, mirror));
-    ret.push_back(makeObject(rightSphere, glass));
+        ret.push_back(makeObject(leftSphere, mirror));
+        ret.push_back(makeObject(rightSphere, glass));
 
-    return ret;
-}();
+        return ret;
+    }();
 }
 
 thread_local std::default_random_engine generator;
@@ -497,7 +510,7 @@ glm::vec3 sample_sphere(const float r, const float u, const float v, float &pdf,
     return sample_p * r;
 }
 
-glm::vec3 radiance (const Ray & r, int nRecursion)
+glm::vec3 radiance (const Ray & r, int nRecursion = 0)
 {
     float t = noIntersect;
 
@@ -508,25 +521,49 @@ glm::vec3 radiance (const Ray & r, int nRecursion)
         //*** Detection ombre ***//
 
         glm::vec3 pImpact = r.origin + t*r.direction;
+        glm::vec3 n = glm::normalize(obj->normal(pImpact));
 
-        glm::vec3 dirOmbre = glm::normalize(scene::light - pImpact);
 
-        Ray rOmbre = {pImpact+ (float)0.018*dirOmbre, dirOmbre}; // "correction" de l'imprécision de position
+        glm::vec3 directColor(0,0,0);
+        float pdf;
+        int nbTestOmbre=1;
 
-        //Ray rOmbre = {pImpact, glm::normalize(scene::light - pImpact)};
+        for(int i=0; i < nbTestOmbre; i++){
 
+            glm::vec3 pLight = scene::light + sample_sphere(9, random_u(), random_u(), pdf, glm::normalize(pImpact - scene::light));
+
+            glm::vec3 dirOmbre = glm::normalize(pLight - pImpact);
+
+            Ray rOmbre = {pImpact+ (float)0.018*dirOmbre, dirOmbre}; // "correction" de l'imprécision de position
+
+            //Ray rOmbre = {pImpact, glm::normalize(scene::light - pImpact)};
+
+            float tOmbre;
+            float distanceLampeCarre =  glm::dot(pLight - pImpact, pLight - pImpact);
+
+            intersect(rOmbre, tOmbre);
+            if(tOmbre == noIntersect || tOmbre*tOmbre > distanceLampeCarre){
+
+                directColor += obj->luxDirect(r, n, rOmbre, distanceLampeCarre);
+            }
+        }
+
+        directColor /= (float)nbTestOmbre;
+
+        /*
         float tOmbre;
-        float distanceLampeCarre =  glm::dot(scene::light - pImpact, scene::light - pImpact);
-
         intersect(rOmbre, tOmbre);
 
-        glm::vec3 n = glm::normalize(obj->normal(rOmbre.origin));
+        glm::vec3 dirOmbre = glm::normalize(scene::light - pImpact);
+        Ray rOmbre = {pImpact+ (float)0.018*dirOmbre, dirOmbre}; // "correction" de l'imprécision de position
 
-        if(tOmbre == noIntersect || tOmbre*tOmbre > distanceLampeCarre){
-            return obj->luxDirect(r, n, rOmbre) + obj->luxIndirect(r, n, pImpact, nRecursion);
-        }
-        else
-            return obj->luxIndirect(r, n, pImpact, nRecursion);
+        float distanceLampeCarre =  glm::dot(scene::light - pImpact, scene::light - pImpact);
+
+        if(tOmbre == noIntersect || tOmbre*tOmbre > distanceLampeCarre)
+            directColor = obj->luxDirect(r, n, rOmbre, distanceLampeCarre);*/
+
+        return directColor + obj->luxIndirect(r, n, pImpact, nRecursion);
+
     }else{
         return glm::vec3(0,0,0);
     }
@@ -550,18 +587,19 @@ int main (int, char **)
 
     glm::mat4 screenToRay = glm::inverse(camera);
 
-    #pragma omp parallel for
     for (int y = 0; y < h; y++)
     {
         std::cerr << "\rRendering: " << 100 * y / (h - 1) << "%";
-        int nAnti;
 
+        const int nAnti = 20;
+
+        #pragma omp parallel for schedule(dynamic, 1)
         for (unsigned short x = 0; x < w; x++)
         {
             glm::vec3 r(0,0,0);
 
             //antialiasing + //réduction bruit dù au indirect de diffus
-            for(nAnti=0; nAnti < 100; nAnti++){
+            for(int i = 0; i < nAnti; i++){
                 float u = random_u(), v = random_u();
 
                 float rs = sqrt(-2*log(u));
@@ -578,12 +616,12 @@ int main (int, char **)
 
                 glm::vec3 d = glm::normalize(pp1 - pp0);
 
-                r += radiance (Ray{pp0, d}, 0);
+                r += radiance (Ray{pp0, d});
             }
             r/=(float)nAnti;
 
 
-            colors[y * w + x] += glm::clamp(r, glm::vec3(0.f, 0.f, 0.f), glm::vec3(1.f, 1.f, 1.f)) * 0.25f;
+            colors[y * w + x] += glm::clamp(r, glm::vec3(0.f, 0.f, 0.f), glm::vec3(1.f, 1.f, 1.f));
         }
     }
 
@@ -593,5 +631,6 @@ int main (int, char **)
 
         for (auto c : colors)
             f << toInt(c.x) << " " << toInt(c.y) << " " << toInt(c.z) << " ";
+            //f << toInt(pow(c.x, 1/2.2)) << " " << toInt(pow(c.y, 1/2.2)) << " " << toInt(pow(c.z, 1/2.2)) << " ";
     }
 }
