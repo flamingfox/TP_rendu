@@ -7,6 +7,7 @@
 #include <memory>
 #include <fstream>
 #include <iostream>
+#include <float.h>
 
 // GLM (vector / matrix)
 #define GLM_FORCE_RADIANS
@@ -15,6 +16,8 @@
 #include <glm/vec3.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+
+//#include <mesh.h>
 
 const float pi = 3.1415927f;
 const float noIntersect = std::numeric_limits<float>::infinity();
@@ -59,6 +62,203 @@ struct Triangle
     }
 };
 
+
+struct Mesh
+{
+    std::vector<glm::vec3> geom;
+    std::vector<int> topo;
+    std::vector<glm::vec3> normalsPoints;
+    std::vector<int> normalIds;
+
+    glm::vec3 minBox, maxBox;
+
+    glm::vec3 position;
+
+    void translation(const float x, const float y, const float z){
+        for(glm::vec3& p: geom){
+            p.x+=x;
+            p.y+=y;
+            p.z+=z;
+        }
+
+        minBox.x+=x;
+        minBox.y+=y;
+        minBox.z+=z;
+        maxBox.x+=x;
+        maxBox.y+=y;
+        maxBox.z+=z;
+    }
+
+    void rescale(float scale){
+
+        translation(-position.x, -position.y, -position.z);
+
+        for(glm::vec3& p: geom){
+            p *= scale;
+        }
+
+        minBox *= scale;
+        maxBox *= scale;
+
+        translation(position.x, position.y, position.z);
+    }
+
+    void loadFromOBJ(const glm::vec3 &center, const char* obj){
+        minBox = glm::vec3(1E100, 1E100, 1E100);
+        maxBox = glm::vec3(-1E100, -1E100, -1E100);
+
+        position = center;
+
+        FILE* f = fopen(obj, "r");
+
+        while (!feof(f)) {
+            char line[255];
+            fgets(line, 255, f);
+            if (line[0]=='v' && line[1]==' ') {
+                glm::vec3 vec;
+                sscanf(line, "v %f %f %f\n", &vec[0], &vec[2], &vec[1]);
+                vec[2] = -vec[2];
+                glm::vec3 p = vec*50.f + center;
+                geom.push_back(p);
+                maxBox[0] = std::max(maxBox[0], p[0]);
+                maxBox[1] = std::max(maxBox[1], p[1]);
+                maxBox[2] = std::max(maxBox[2], p[2]);
+                minBox[0] = std::min(minBox[0], p[0]);
+                minBox[1] = std::min(minBox[1], p[1]);
+                minBox[2] = std::min(minBox[2], p[2]);
+            }
+            if (line[0]=='v' && line[1]=='n') {
+                glm::vec3 vec;
+                sscanf(line, "vn %f %f %f\n", &vec[0], &vec[2], &vec[1]);
+                vec[2] = -vec[2];
+                normalsPoints.push_back(vec);
+            }
+            if (line[0]=='f') {
+                int i0, i1, i2;
+                int j0,j1,j2;
+                int k0,k1,k2;
+
+                int n = 0;
+                //sscanf(line, "f %u/%u/%u %u/%u/%u %u/%u/%u\n", &i0, &j0, &k0, &i1, &j1, &k1, &i2, &j2, &k2 );
+
+                //count of '/' occuration in the line
+                for (unsigned int i=0; i < sizeof(line); i++){
+                    if(line[i]=='/')
+                        n++;
+                }
+
+                if(n==0){
+                    sscanf(line, "f %u %u %u\n", &i0, &i1, &i2);
+
+                    topo.push_back(i0-1);
+                    topo.push_back(i1-1);
+                    topo.push_back(i2-1);
+
+                }
+                else if(n==3){
+                    sscanf(line, "f %u/%u %u/%u %u/%u\n", &i0, &k0, &i1, &k1, &i2, &k2 );
+
+                    topo.push_back(i0-1);
+                    topo.push_back(i1-1);
+                    topo.push_back(i2-1);
+                    normalIds.push_back(k0-1);
+                    normalIds.push_back(k1-1);
+                    normalIds.push_back(k2-1);
+
+                }
+                else if(n==6){
+                    sscanf(line, "f %u/%u/%u %u/%u/%u %u/%u/%u\n", &i0, &j0, &k0, &i1, &j1, &k1, &i2, &j2, &k2 );
+
+                    topo.push_back(i0-1);
+                    topo.push_back(i1-1);
+                    topo.push_back(i2-1);
+                    normalIds.push_back(k0-1);
+                    normalIds.push_back(k1-1);
+                    normalIds.push_back(k2-1);
+                }
+            }
+        }
+
+        /*boundingSphere.C = 0.5*(minVal+maxVal);
+        boundingSphere.R = sqrt((maxVal-minVal).sqrNorm())*0.5;*/
+
+        fclose(f);
+    }
+
+    const glm::vec3 getNormal(const glm::vec3& point) const{
+        return glm::vec3(0,1,1);
+        //return glm::normalize(glm::cross(v1-v0, v2-v0));
+    }
+};
+
+
+bool intersectBox(const Ray &r, const glm::vec3 &min, const glm::vec3 &max)
+{
+    float tmin, tmax, tymin, tymax, tzmin, tzmax;
+    float div;
+
+    if(r.direction.x == 0)    {
+        tmin = FLT_MIN;
+        tmax = FLT_MAX;
+    }
+    else if(r.direction.x > 0)    {
+        div = 1 / r.direction.x;
+        tmin = (min.x - r.origin.x) * div;
+        tmax = (max.x - r.origin.x) * div;
+    }
+    else    {
+        div = 1 / r.direction.x;
+        tmin = (max.x - r.origin.x) * div;
+        tmax = (min.x - r.origin.x) * div;
+    }
+
+    if(r.direction.y == 0)    {
+        tymin = FLT_MIN;
+        tymax = FLT_MAX;
+    }
+    else if(r.direction.y >= 0)    {
+        div = 1 / r.direction.y;
+        tymin = (min.y - r.origin.y) * div;
+        tymax = (max.y - r.origin.y) * div;
+    }
+    else    {
+        div = 1 / r.direction.y;
+        tymin = (max.y - r.origin.y) * div;
+        tymax = (min.y - r.origin.y) * div;
+    }
+
+    if( (tmin > tymax) || (tymin > tmax) )
+        return false;
+
+    if(tymin > tmin)
+        tmin = tymin;
+
+    if(tymax < tmax)
+        tmax = tymax;
+
+
+    if(r.direction.z == 0)    {
+        tzmin = FLT_MIN;
+        tzmax = FLT_MAX;
+    }
+    else if(r.direction.z > 0)    {
+        div = 1 / r.direction.z;
+        tzmin = (min.z - r.origin.z) * div;
+        tzmax = (max.z - r.origin.z) * div;
+    }
+    else    {
+        div = 1 / r.direction.z;
+        tzmin = (max.z - r.origin.z) * div;
+        tzmax = (min.z - r.origin.z) * div;
+    }
+
+    if( (tmin > tzmax) || (tzmin > tmax) )
+        return false;
+
+    return true;
+}
+
+
 // WARRING: works only if r.d is normalized
 float intersect (const Ray & ray, const Sphere &sphere)
 {				// returns distance, 0 if nohit
@@ -98,6 +298,35 @@ float intersect(const Ray & ray, const Triangle &triangle)
         return noIntersect;
 
     return t;
+}
+
+float intersect(const Ray & ray, const Mesh &mesh)
+{
+
+    if(!intersectBox(ray, mesh.minBox, mesh.maxBox)) return noIntersect;
+
+    float tFin = noIntersect, tTemp = noIntersect;
+
+    for(unsigned int i=0; i<mesh.topo.size(); i+=3){
+
+        Triangle tri{mesh.geom[mesh.topo[i]], mesh.geom[mesh.topo[i+1]], mesh.geom[mesh.topo[i+2]]};
+
+        tTemp = intersect(ray, tri);
+
+        if(tTemp != noIntersect){
+
+            if(tFin == noIntersect){
+                tFin = tTemp;
+            }
+            else if(tTemp < tFin){
+                tFin = tTemp;
+            }
+        }
+
+    }
+
+    return tFin;
+
 }
 
 struct Diffuse
@@ -258,7 +487,7 @@ struct Mirror
     glm::vec3 direct(const Ray& c, const glm::vec3& n, const Ray& l, const float& distanceLuxCarre) const {
         //direct = V(p, lampe) * BSDF_direct() * couleurLampe
         return BSDF_Direct(c.direction, n, l.direction);
-                /*(float)pow( fabs(glm::dot( reflect(l.direction, n), -c.direction )), coefficientSpeculaire ) *
+        /*(float)pow( fabs(glm::dot( reflect(l.direction, n), -c.direction )), coefficientSpeculaire ) *
                 LUX / distanceLuxCarre;*/
     }
 
@@ -332,59 +561,65 @@ namespace scene
 {
 // Primitives
 
-    // Left Wall
-    const Triangle leftWallA{{0, 0, 0}, {0, 100, 0}, {0, 0, 150}};
-    const Triangle leftWallB{{0, 100, 150}, {0, 100, 0}, {0, 0, 150}};
+// Left Wall
+const Triangle leftWallA{{0, 0, 0}, {0, 100, 0}, {0, 0, 150}};
+const Triangle leftWallB{{0, 100, 150}, {0, 100, 0}, {0, 0, 150}};
 
-    // Right Wall
-    const Triangle rightWallA{{100, 0, 0}, {100, 100, 0}, {100, 0, 150}};
-    const Triangle rightWallB{{100, 100, 150}, {100, 100, 0}, {100, 0, 150}};
+// Right Wall
+const Triangle rightWallA{{100, 0, 0}, {100, 100, 0}, {100, 0, 150}};
+const Triangle rightWallB{{100, 100, 150}, {100, 100, 0}, {100, 0, 150}};
 
-    // Back wall
-    const Triangle backWallA{{0, 0, 0}, {100, 0, 0}, {100, 100, 0}};
-    const Triangle backWallB{{0, 0, 0}, {0, 100, 0}, {100, 100, 0}};
+// Back wall
+const Triangle backWallA{{0, 0, 0}, {100, 0, 0}, {100, 100, 0}};
+const Triangle backWallB{{0, 0, 0}, {0, 100, 0}, {100, 100, 0}};
 
-    // Bottom Floor
-    const Triangle bottomWallA{{0, 0, 0}, {100, 0, 0}, {100, 0, 150}};
-    const Triangle bottomWallB{{0, 0, 0}, {0, 0, 150}, {100, 0, 150}};
+// Bottom Floor
+const Triangle bottomWallA{{0, 0, 0}, {100, 0, 0}, {100, 0, 150}};
+const Triangle bottomWallB{{0, 0, 0}, {0, 0, 150}, {100, 0, 150}};
 
-    // Top Ceiling
-    const Triangle topWallA{{0, 100, 0}, {100, 100, 0}, {0, 100, 150}};
-    const Triangle topWallB{{100, 100, 150}, {100, 100, 0}, {0, 100, 150}};
+// Top Ceiling
+const Triangle topWallA{{0, 100, 0}, {100, 100, 0}, {0, 100, 150}};
+const Triangle topWallB{{100, 100, 150}, {100, 100, 0}, {0, 100, 150}};
 
-    const Sphere leftSphere{16.5, glm::vec3 {27, 16.5, 47}};
-    const Sphere rightSphere{16.5, glm::vec3 {73, 16.5, 78}};
+const Sphere leftSphere{16.5, glm::vec3 {27, 16.5, 47}};
+const Sphere rightSphere{16.5, glm::vec3 {73, 16.5, 78}};
 
-    const glm::vec3 light{50, 70, 81.6};
+const glm::vec3 light{50, 70, 81.6};
 
-    // Materials
-    const Diffuse white{{.75, .75, .75}, 10};
-    const Diffuse red{{.75, .25, .25}, 10};
-    const Diffuse blue{{.25, .25, .75}, 10};
+// Materials
+const Diffuse white{{.75, .75, .75}, 10};
+const Diffuse red{{.75, .25, .25}, 10};
+const Diffuse blue{{.25, .25, .75}, 10};
 
-    const Glass glass{{.9, .7, .9}, 20};
-    const Mirror mirror{{.9, .9, .5}, 0};
+const Glass glass{{.9, .7, .9}, 20};
+const Mirror mirror{{.9, .9, .5}, 0};
 
-    // Objects
-    // Note: this is a rather convoluted way of initialising a vector of unique_ptr ;)
-    const std::vector<std::unique_ptr<Object>> objects = [] (){
-        std::vector<std::unique_ptr<Object>> ret;
-        ret.push_back(makeObject(backWallA, white));
-        ret.push_back(makeObject(backWallB, white));
-        ret.push_back(makeObject(topWallA, white));
-        ret.push_back(makeObject(topWallB, white));
-        ret.push_back(makeObject(bottomWallA, white));
-        ret.push_back(makeObject(bottomWallB, white));
-        ret.push_back(makeObject(rightWallA, blue));
-        ret.push_back(makeObject(rightWallB, blue));
-        ret.push_back(makeObject(leftWallA, red));
-        ret.push_back(makeObject(leftWallB, red));
+Mesh m, m2, m3;
 
-        ret.push_back(makeObject(leftSphere, mirror));
-        ret.push_back(makeObject(rightSphere, glass));
+// Objects
+// Note: this is a rather convoluted way of initialising a vector of unique_ptr ;)
+const std::vector<std::unique_ptr<Object>> objects = [] (){
+    std::vector<std::unique_ptr<Object>> ret;
+    ret.push_back(makeObject(backWallA, white));
+    ret.push_back(makeObject(backWallB, white));
+    ret.push_back(makeObject(topWallA, white));
+    ret.push_back(makeObject(topWallB, white));
+    ret.push_back(makeObject(bottomWallA, white));
+    ret.push_back(makeObject(bottomWallB, white));
+    ret.push_back(makeObject(rightWallA, blue));
+    ret.push_back(makeObject(rightWallB, blue));
+    ret.push_back(makeObject(leftWallA, red));
+    ret.push_back(makeObject(leftWallB, red));
 
-        return ret;
-    }();
+    /*ret.push_back(makeObject(leftSphere, mirror));
+    ret.push_back(makeObject(rightSphere, glass));*/
+
+    ret.push_back(makeObject(m, blue));
+    ret.push_back(makeObject(m2, red));
+    ret.push_back(makeObject(m3, mirror));
+
+    return ret;
+}();
 }
 
 thread_local std::default_random_engine generator;
@@ -571,6 +806,19 @@ glm::vec3 radiance (const Ray & r, int nRecursion = 0)
 
 int main (int, char **)
 {
+    scene::m.loadFromOBJ(glm::vec3(80,0,50), "Beautiful_Girl.obj");
+    scene::m2 = scene::m;
+    scene::m3 = scene::m;
+
+    scene::m.rescale(0.5);
+
+    scene::m2.rescale(0.75);
+    scene::m2.translation(-30,0,0);
+
+
+    scene::m3.translation(-60,0,0);
+
+
     int w = 768, h = 768;
     std::vector<glm::vec3> colors(w * h, glm::vec3{0.f, 0.f, 0.f});
 
@@ -591,9 +839,9 @@ int main (int, char **)
     {
         std::cerr << "\rRendering: " << 100 * y / (h - 1) << "%";
 
-        const int nAnti = 20;
+        const int nAnti = 1;
 
-        #pragma omp parallel for schedule(dynamic, 1)
+#pragma omp parallel for schedule(dynamic, 1)
         for (unsigned short x = 0; x < w; x++)
         {
             glm::vec3 r(0,0,0);
@@ -631,6 +879,6 @@ int main (int, char **)
 
         for (auto c : colors)
             f << toInt(c.x) << " " << toInt(c.y) << " " << toInt(c.z) << " ";
-            //f << toInt(pow(c.x, 1/2.2)) << " " << toInt(pow(c.y, 1/2.2)) << " " << toInt(pow(c.z, 1/2.2)) << " ";
+        //f << toInt(pow(c.x, 1/2.2)) << " " << toInt(pow(c.y, 1/2.2)) << " " << toInt(pow(c.z, 1/2.2)) << " ";
     }
 }

@@ -11,3 +11,8 @@ INCLUDEPATH += C:\lib
 SOURCES += \
     smallpt.cpp
 
+HEADERS +=
+
+DISTFILES += \
+    M9.obj
+
