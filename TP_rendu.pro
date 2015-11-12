@@ -13,6 +13,3 @@ SOURCES += \
 
 HEADERS +=
 
-DISTFILES += \
-    M9.obj
-
